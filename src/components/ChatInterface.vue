@@ -35,7 +35,7 @@
             <el-icon><User /></el-icon>
           </el-avatar>
           <el-avatar v-else :size="32" style="background: #409eff">
-            <el-icon><Robot /></el-icon>
+            <el-icon><Avatar /></el-icon>
           </el-avatar>
         </div>
 
@@ -65,7 +65,7 @@
         <div class="message-item ai-message">
           <div class="message-avatar">
             <el-avatar :size="32" style="background: #409eff">
-              <el-icon><Robot /></el-icon>
+              <el-icon><Avatar /></el-icon>
             </el-avatar>
           </div>
           <div class="message-content">
@@ -133,7 +133,7 @@ import {
   Delete, 
   ChatDotRound, 
   User, 
-  Robot, 
+  Avatar, 
   CopyDocument, 
   Refresh, 
   Paperclip 

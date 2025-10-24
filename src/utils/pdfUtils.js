@@ -1,8 +1,7 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf'
-import 'pdfjs-dist/legacy/build/pdf.worker.entry'
+import * as pdfjsLib from 'pdfjs-dist'
 
-// 设置worker路径
-pdfjsLib.GlobalWorkerOptions.workerSrc = import.meta.env.VITE_PDF_WORKER_URL || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js'
+// 设置worker路径 - 使用最新版本的worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = import.meta.env.VITE_PDF_WORKER_URL || `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.296/pdf.worker.min.js`
 
 export class PDFUtils {
   constructor() {
