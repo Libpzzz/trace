@@ -70,4 +70,8 @@
     "vite-plugin-html": "^3.2.2",
     "vite-plugin-require-transform": "^1.0.21"
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 58ae6069d7fa64ab7c770b666d1fe82a10dedff4
