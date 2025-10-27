@@ -65,7 +65,7 @@
         <div class="message-item ai-message">
           <div class="message-avatar">
             <el-avatar :size="32" style="background: #409eff">
-              <el-icon><Robot /></el-icon>
+              <el-icon></el-icon>
             </el-avatar>
           </div>
           <div class="message-content">
