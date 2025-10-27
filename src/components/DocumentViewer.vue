@@ -81,19 +81,14 @@
             <p>请选择一个PDF文件开始查看</p>
           </div>
 
-          <div v-else class="pdf-content" ref="pdfContent">
+          <div v-else class="pdf-content" ref="pdfContent" :style="{ transform: `scale(${pdfScale})`, transformOrigin: 'top center' }">
             <div 
               v-for="page in pages" 
               :key="page.pageNum"
               class="pdf-page"
               :data-page="page.pageNum"
-              :style="{
-                transform: `scale(${pdfScale})`,
-                transformOrigin: '0 0',
-                marginBottom: `${20 * pdfScale}px`
-              }"
             >
-              <div class="page-content" :data-page="page.pageNum" ref="pageContent">
+              <div class="page-content" :data-page="page.pageNum" ref="pageContent" style="margin-bottom: 20px;">
                 <!-- PDF页面内容将在这里渲染 -->
               </div>
             </div>
@@ -122,11 +117,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue'
-import { Upload, Camera, Edit, Document, ArrowLeft, ArrowRight, Minus, Plus } from '@element-plus/icons-vue'
+import { ref, onMounted, nextTick } from 'vue'
+import { Upload, Camera, Document, ArrowLeft, ArrowRight, Minus, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
-import * as pdfjsLib from "pdfjs-dist";
+// 导入 pdfjs-dist
+import * as pdfjsLib from 'pdfjs-dist'
+
+// 设置 Worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString()
+
+// 导入 pdf_viewer.mjs
+import { TextLayerBuilder } from 'pdfjs-dist/web/pdf_viewer.mjs'
+import "pdfjs-dist/web/pdf_viewer.css";
 
 import ChatInterface from './ChatInterface.vue'
 import { PDFUtils } from '../utils/pdfUtils.js'
@@ -157,57 +163,20 @@ let textSelectionUtils = null
 onMounted(() => {
   initializeUtils()
   loadDemoFile()
-  
-  // 注释掉：现在使用批量加载所有页面，不再需要按需加载
-  // setupScrollObserver()
 })
-
-function setupScrollObserver() {
-  // 使用 Intersection Observer 监听页面是否进入视口
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting && entry.intersectionRatio > 0) {
-        const pageElement = entry.target
-        const pageNum = parseInt(pageElement.getAttribute('data-page'))
-        if (pageNum && pages.value[pageNum - 1] && !pages.value[pageNum - 1].loaded) {
-          loadAndRenderPage(pageNum)
-        }
-      }
-    })
-  }, {
-    root: documentContent.value,
-    rootMargin: '200px', // 提前200px开始加载
-    threshold: 0.1
-  })
-
-  // 监听所有页面元素
-  watch(() => pages.value.length, () => {
-    nextTick(() => {
-      const pageElements = document.querySelectorAll('.page-content')
-      pageElements.forEach(pageElement => {
-        observer.observe(pageElement)
-      })
-    })
-  }, { immediate: true })
-
-  // 保存observer以便清理
-  // observer在组件卸载时需要disconnect，但当前没有onUnmounted
-}
 
 function initializeUtils() {
   pdfUtils = new PDFUtils()
   screenshotUtils = new ScreenshotUtils()
-  screenshotUtils.setPDFUtils(pdfUtils) // 设置PDF工具类以便从canvas直接提取图像
+  screenshotUtils.setPDFUtils(pdfUtils)
   textSelectionUtils = new TextSelectionUtils()
 }
 
 function setupEventListeners() {
-  // 监听截图AI询问事件 - 在 pdfContent 上监听
   if (pdfContent.value) {
     pdfContent.value.addEventListener('screenshot-ai-ask', handleScreenshotAIAsk)
   }
   
-  // 监听文本AI询问事件 - 在 documentPanel 上监听
   if (documentPanel.value) {
     documentPanel.value.addEventListener('text-ai-ask', handleTextAIAsk)
   }
@@ -224,21 +193,14 @@ async function handleFileSelect(event) {
   try {
     const success = await pdfUtils.loadPDF(file)
     if (success) {
-      // 先设置pdfLoaded为true，这样模板才会渲染.pdf-content元素
       pdfLoaded.value = true
       totalPages.value = pdfUtils.getNumPages()
       
-      // 等待DOM更新，确保页面元素已经渲染
       await nextTick()
       await nextTick()
       
-      // 然后再渲染PDF内容
       await renderPDF()
-      
-      // 设置事件监听器（在 PDF 加载完成后）
       setupEventListeners()
-      
-      // 默认启用文本选择
       enableTextSelection()
       
       ElMessage.success('PDF文件加载成功')
@@ -252,21 +214,14 @@ async function loadDemoFile() {
   try {
     const success = await pdfUtils.loadPDFFromUrl('https://image.keymemox.com/2025/10/23/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%E8%AF%AD%E6%96%87%E4%BA%8C%E5%B9%B4%E7%BA%A7%E4%B8%8A%E5%86%8C6983c48a-1ece-44f9-a199-83f2e5220874.pdf')
     if (success) {
-      // 先设置pdfLoaded为true，这样模板才会渲染.pdf-content元素
       pdfLoaded.value = true
       totalPages.value = pdfUtils.getNumPages()
       
-      // 等待DOM更新，确保页面元素已经渲染
       await nextTick()
       await nextTick()
       
-      // 然后再渲染PDF内容
       await renderPDF()
-      
-      // 设置事件监听器（在 PDF 加载完成后）
       setupEventListeners()
-      
-      // 默认启用文本选择
       enableTextSelection()
       
       ElMessage.success('示例文档加载成功')
@@ -277,29 +232,23 @@ async function loadDemoFile() {
 }
 
 async function renderPDF() {
-  // 初始化pages数组
   const numPages = pdfUtils.getNumPages()
   pages.value = Array.from({ length: numPages }, (_, i) => ({
     pageNum: i + 1,
     loaded: false
   }))
 
-  // 等待DOM更新完成
   await nextTick()
   
-  // 按顺序加载所有页面的文本层
   for (let pageNum = 1; pageNum <= numPages; pageNum++) {
     await loadAndRenderPage(pageNum)
-    // 每页加载后延迟10ms，避免UI阻塞
     if (pageNum % 5 === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
   }
-  
 }
 
 async function loadAndRenderPage(pageNum) {
-  // 检查是否已加载
   const index = pageNum - 1
   if (pages.value[index] && pages.value[index].loaded) {
     return
@@ -308,10 +257,9 @@ async function loadAndRenderPage(pageNum) {
   await nextTick()
   let pageData = null
   try {
-    // 加载指定页
     pageData = await pdfUtils.loadPage(pageNum)
-    
   } catch (error) {
+    console.error(`加载页面 ${pageNum} 失败:`, error)
     return
   }
   
@@ -319,7 +267,6 @@ async function loadAndRenderPage(pageNum) {
     return
   }
   
-  // 更新pages数组中对应页的状态
   pages.value[index] = {
     ...pages.value[index],
     ...pageData,
@@ -328,7 +275,7 @@ async function loadAndRenderPage(pageNum) {
   
   await nextTick()
   
-  // 确保选择正确的页面元素
+  // 找到对应的页面元素
   const allPageElements = document.querySelectorAll('.page-content')
   let pageElement = null
   for (let el of allPageElements) {
@@ -337,13 +284,13 @@ async function loadAndRenderPage(pageNum) {
       break
     }
   }
-  // 如果找不到元素，尝试所有可能的元素
+  
   if (!pageElement) {
     console.warn(`找不到页面 ${pageNum} 的DOM元素`)
+    return
   }
   
   if (pageElement && pageData.canvas) {
-    // 获取容器宽度（在清空内容之前）
     const containerWidth = pageElement.clientWidth || pageElement.offsetWidth
     if (!containerWidth || containerWidth === 0) {
       return
@@ -352,16 +299,9 @@ async function loadAndRenderPage(pageNum) {
     // 清除旧内容
     pageElement.innerHTML = ''
     
-    // 清除所有旧文本层
-    const oldTextLayers = document.querySelectorAll('.text-layer')
-    oldTextLayers.forEach(layer => {
-      layer.remove()
-    })
-    
-    // 等待DOM更新
     await nextTick()
     
-    // 计算实际的背景图片高度（contain模式）
+    // 计算实际显示高度
     const aspectRatio = pageData.viewport.height / pageData.viewport.width
     const actualHeight = containerWidth * aspectRatio
     
@@ -372,7 +312,7 @@ async function loadAndRenderPage(pageNum) {
       height: ${actualHeight}px;
     `
     
-    // 将 canvas 添加到 DOM 中（用于截图）
+    // 创建 canvas 包装器（背景层，不接收事件）
     const canvasWrapper = document.createElement('div')
     canvasWrapper.className = 'canvas-wrapper'
     canvasWrapper.setAttribute('data-page-canvas', pageData.pageNum)
@@ -382,81 +322,126 @@ async function loadAndRenderPage(pageNum) {
       left: 0;
       width: 100%;
       height: 100%;
-      display: flex;
-      justify-content: flex-start;
-      align-items: flex-start;
+      z-index: 1;
+      pointer-events: none;
     `
     
-    // 创建一个可见的 canvas 用于显示
+    // 创建显示用的 canvas
     const displayCanvas = document.createElement('canvas')
     displayCanvas.width = containerWidth
     displayCanvas.height = actualHeight
     const displayCtx = displayCanvas.getContext('2d')
     
-    // 将原 canvas 的内容绘制到显示 canvas
+    // 绘制 PDF 内容
     displayCtx.drawImage(pageData.canvas, 0, 0, displayCanvas.width, displayCanvas.height)
     
     canvasWrapper.appendChild(displayCanvas)
     pageElement.appendChild(canvasWrapper)
     
-    // 同时保存原始 canvas 到页面数据中，用于截图
+    // 保存 canvas 引用
     pages.value[index].displayCanvas = displayCanvas
     pages.value[index].originalCanvas = pageData.canvas
     
-    // 创建文本层容器用于文本选择
+    // 创建文本层（顶层，接收鼠标事件）
     const textLayer = document.createElement('div')
     textLayer.className = 'text-layer'
-    textLayer.setAttribute('data-page-layer', pageData.pageNum) // 添加标识
-    textLayer.setAttribute(
-      "style",
-      `
-        position: absolute;
-        top: 0;
-        left: 0;
-        pointer-events: auto;
-        z-index: 2;
-      `
-    )
+    textLayer.setAttribute('data-page-layer', pageData.pageNum)
     
-    // 将文本层添加到页面元素
+    // 先添加到DOM，让后续能正确获取父元素尺寸
     pageElement.appendChild(textLayer)
-    // 渲染文本层
-    renderTextLayer(textLayer, pageData.pageNum, pageData.viewport)
+    
+    // 等待DOM更新
+    await nextTick()
+    
+    // 渲染文本层 - 关键修复：传入正确的参数
+    await renderTextLayer(textLayer, pageData.page, pageData.viewport, pageData.pageNum)
   }
   
-  // 预加载相邻页面
   pdfUtils.preloadAdjacentPages(pageNum, 1)
 }
 
-async function loadCurrentPage() {
-  await loadAndRenderPage(currentPage.value)
-}
-
-async function renderTextLayer(textLayer, page, viewport) {
-  const textContent = await page.getTextContent();
-  const canvas = textLayer.previousElementSibling; // 对应同页canvas
-  const ctx = canvas.getContext("2d");
-
-  // 清空旧内容
-  textLayer.innerHTML = "";
-
-  textContent.items.forEach((item) => {
-    const span = document.createElement("span");
-    span.textContent = item.str;
-
-    // 将 PDF 坐标转换为 HTML 坐标
-    const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
-    const [a, b, c, d, e, f] = transform;
-
-    // 定位
-    span.style.position = "absolute";
-    span.style.whiteSpace = "pre";
-    span.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${e}, ${f})`;
-    span.style.transformOrigin = "0 0";
-    span.style.color = "transparent"; // 可改为黑色调试
-
-    textLayer.appendChild(span);
-  });
+async function renderTextLayer(textLayerDiv, page, viewport, pageNum) {
+  try {
+    // 获取实际的容器尺寸
+    const pageElement = textLayerDiv.parentElement
+    const containerWidth = pageElement.clientWidth || pageElement.offsetWidth
+    const containerHeight = pageElement.clientHeight || pageElement.offsetHeight
+    
+    if (!containerWidth || !containerHeight) {
+      console.warn(`页面 ${pageNum} - 无法获取容器尺寸`)
+      return
+    }
+    
+    console.log(`页面 ${pageNum} - 容器尺寸: ${containerWidth}x${containerHeight}, 视口尺寸: ${viewport.width}x${viewport.height}`)
+    
+    // 计算缩放比例
+    const scale = containerWidth / viewport.width
+    
+    // 使用缩放后的视口
+    const scaledViewport = viewport.clone({ scale })
+    
+    // 在 pdfjs-dist 5.x 中，TextLayerBuilder 需要传入 pdfPage 对象
+    const textLayer = new TextLayerBuilder({
+      pdfPage: page,
+      enablePermissions: true
+    });
+    
+    // 使用异步 render 方法，传入 viewport
+    await textLayer.render({
+      viewport: scaledViewport
+    });
+    
+    // 先清空容器并添加文本层
+    textLayerDiv.innerHTML = ''
+    textLayerDiv.appendChild(textLayer.div)
+    
+    // 设置文本层的 div 尺寸（直接使用容器尺寸，不要100%）
+    textLayer.div.style.cssText = `
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: ${containerWidth}px;
+      height: ${containerHeight}px;
+      z-index: 1;
+      overflow: hidden;
+    `
+    
+    // 手动设置 CSS 变量（包括 --total-scale-factor）
+    // 这个变量用于计算文本的字体大小
+    // 根据实际测试，需要添加0.6的偏移量来对齐canvas绘制的文本
+    // 原因：pdf-viewer.css 中的 text-layer span 使用 font-size: calc(var(--total-scale-factor) * <原始字体大小>)
+    // 但实际渲染时还需要考虑其他因素（如像素密度、浏览器缩放等），所以需要额外调整
+    const adjustedScale = scale + 0.6
+    textLayer.div.style.setProperty('--total-scale-factor', adjustedScale.toString())
+    
+    // 设置外层容器的样式
+    textLayerDiv.style.cssText = `
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: auto;
+      user-select: text;
+      -webkit-user-select: text;
+      cursor: text;
+    `
+    
+    // 确保文本层的spans可以正常选中
+    setTimeout(() => {
+      const spans = textLayerDiv.querySelectorAll('span')
+      spans.forEach(span => {
+        span.style.cursor = 'text'
+        span.style.pointerEvents = 'auto'
+        span.style.userSelect = 'text'
+      })
+      console.log(`页面 ${pageNum} - 文本层渲染完成，spans数量: ${spans.length}`)
+    }, 100)
+    
+  } catch (error) {
+    console.error(`页面 ${pageNum} 文本层渲染失败:`, error)
+  }
 }
 
 function startScreenshot() {
@@ -470,12 +455,10 @@ function startScreenshot() {
     return
   }
   
-  // 清除文本选择操作栏
   if (textSelectionUtils) {
     textSelectionUtils.clearSelection()
   }
   
-  // 传入pdfContent作为截图容器，这样能覆盖整个PDF显示区域
   try {
     screenshotUtils.startCapture(pdfContent.value)
   } catch (error) {
@@ -485,20 +468,8 @@ function startScreenshot() {
 
 function enableTextSelection() {
   if (!pdfContent.value) return
-  
   textSelectionUtils.initTextSelection(documentPanel.value)
 }
-
-// function disableTextSelection() {
-//   textSelectionUtils.clearSelection()
-
-//   // 禁用文本选择样式
-//   const textLayers = document.querySelectorAll('.text-layer span')
-//   textLayers.forEach(span => {
-//     span.style.color = 'rgba(0, 0, 0, 0.9)'
-//     span.style.background = 'rgba(255, 255, 255, 0.8)'
-//   })
-// }
 
 function toggleThumbnails() {
   thumbnailsVisible.value = !thumbnailsVisible.value
@@ -541,20 +512,18 @@ function scaleDown() {
 }
 
 async function handlePageChange(page) {
-  // 只需要滚动到页面，不需要重复加载
   scrollToPage(page)
 }
 
 function handleScreenshotAIAsk(event) {
   const { screenshot, file, selection } = event.detail
   
-  // 发送截图到AI对话
   if (chatInterface.value) {
     chatInterface.value.addMessage({
       type: 'user',
       content: '请分析这张截图',
       image: screenshot,
-      file: file, // 传递File对象
+      file: file,
       timestamp: new Date()
     })
   }
@@ -563,7 +532,6 @@ function handleScreenshotAIAsk(event) {
 function handleTextAIAsk(event) {
   const { text, action, prompt } = event.detail
   
-  // 发送文本到AI对话
   if (chatInterface.value) {
     chatInterface.value.addMessage({
       type: 'user',
@@ -574,14 +542,11 @@ function handleTextAIAsk(event) {
 }
 
 function handleSendMessage(message) {
-  // 处理用户发送的消息
-  // 这里可以调用AI API
-  // 模拟AI回复
   setTimeout(() => {
     if (chatInterface.value) {
       chatInterface.value.addMessage({
         type: 'ai',
-        content: '这是AI的回复消息。我已经收到了您的问题，正在为您分析...',
+        content: '这是AI的回复消息。我已经收到了您的问题,正在为您分析...',
         timestamp: new Date()
       })
     }
@@ -774,23 +739,39 @@ function handleSendMessage(message) {
   position: relative;
 }
 
+/* 关键样式：文本层 */
 .text-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: auto;
-  z-index: 2;
+  /* 确保文本层覆盖整个页面 */
+  width: 100% !important;
+  height: 100% !important;
+  /* 确保z-index高于画布层 */
+  z-index: 10 !important;
+  /* 确保没有被其他元素遮挡 */
+  pointer-events: auto !important;
 }
 
-.text-layer span {
-  position: absolute;
-  user-select: text;
-  cursor: text;
-  white-space: pre;
-  overflow: visible !important;
-  /* 临时显示文本，方便调试 */
-  color: rgba(0, 0, 0, 0.1);
-  background: rgba(255, 0, 0, 0.05);
+.text-layer > span {
+  /* 确保文本span元素正确定位 */
+  transform-origin: 0 0 !important;
+  white-space: pre !important;
+  /* 透明文本但保留选中能力 */
+  color: transparent !important;
+  /* 确保可以被鼠标选中 */
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* 选中文本时的高亮效果 */
+.text-layer span::selection,
+.text-layer > span::selection {
+  background: rgba(64, 158, 255, 0.3);
+  color: transparent;
+}
+
+.text-layer span::-moz-selection,
+.text-layer > span::-moz-selection {
+  background: rgba(64, 158, 255, 0.3);
+  color: transparent;
 }
 
 .chat-panel {
@@ -820,7 +801,6 @@ function handleSendMessage(message) {
   pointer-events: none;
 }
 
-/* 动画 */
 @keyframes selectionBoxAppear {
   from {
     opacity: 0;
@@ -832,7 +812,6 @@ function handleSendMessage(message) {
   }
 }
 
-/* 文本选择操作按钮样式 */
 .text-selection-actions,
 .screenshot-actions {
   position: absolute;
@@ -864,7 +843,6 @@ function handleSendMessage(message) {
   border-color: #409eff;
 }
 
-/* 响应式设计 */
 @media (max-width: 768px) {
   .document-viewer {
     flex-direction: column;

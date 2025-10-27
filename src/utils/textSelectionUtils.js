@@ -24,6 +24,9 @@ export class TextSelectionUtils {
     const selection = window.getSelection()
     
     if (selection.rangeCount === 0) {
+      // 当没有选择时，清空当前选择并隐藏按钮
+      this.selectedText = ''
+      this.selectionRange = null
       this.hideActionButtons()
       return
     }
@@ -32,6 +35,9 @@ export class TextSelectionUtils {
     const selectedText = selection.toString().trim()
 
     if (selectedText.length === 0) {
+      // 当选择文本为空时，清空当前选择并隐藏按钮
+      this.selectedText = ''
+      this.selectionRange = null
       this.hideActionButtons()
       return
     }
@@ -39,6 +45,9 @@ export class TextSelectionUtils {
     // 检查选择是否在容器内
     const containerElement = container.querySelector('.pdf-content')
     if (!containerElement || !containerElement.contains(range.commonAncestorContainer)) {
+      // 当选择不在容器内时，清空当前选择并隐藏按钮
+      this.selectedText = ''
+      this.selectionRange = null
       this.hideActionButtons()
       return
     }
@@ -142,7 +151,11 @@ export class TextSelectionUtils {
 
   hideActionButtonsHandler = (e) => {
     if (this.actionButtons && !this.actionButtons.contains(e.target)) {
-      this.hideActionButtons()
+      // 检查是否还有文本选择
+      const selection = window.getSelection()
+      if (selection.rangeCount === 0 || selection.toString().trim().length === 0) {
+        this.hideActionButtons()
+      }
     }
   }
 
