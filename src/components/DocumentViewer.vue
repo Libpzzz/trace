@@ -52,28 +52,44 @@
           v-show="thumbnailsVisible && pdfLoaded"
           class="thumbnail-container"
           ref="thumbnailContainerRef"
+          @scroll="handleThumbnailScroll"
         >
+          <!-- 顶部占位符 -->
+          <div class="thumbnail-spacer" :style="{ height: thumbnailStartIndex * 123 + 'px' }"></div>
+          
           <div
             class="thumbnail-list"
-            v-for="(page, index) in pages"
-            :key="index"
+            v-for="(page, index) in visibleThumbnails"
+            :key="page.pageNum"
             @click="scrollToPage(page.pageNum)"
+            ref="thumbnailListRef"
+            :data-thumb-page="page.pageNum"
           >
-            <div
-              class="thumbnail-placeholder"
+            <img
+              v-if="page.thumbnailUrl"
+              class="thumbnail-img"
               :style="{
-                border: currentPage == page.pageNum ? '2px solid #409eff' : '1px solid #DCDCDC',
-                width: '80px',
-                height: '113px',
+                border: currentPage == page.pageNum ? '1px solid #9A91FF' : '1px solid #DCDCDC'
               }"
+              :src="page.thumbnailUrl"
+              alt=""
+            />
+            <p
+              :style="{
+                color: currentPage == page.pageNum ? '#5F53F4' : '#3F3F3F'
+              }"
+              class="thumbnail-number"
             >
-              <p class="thumbnail-number">{{ page.pageNum }}</p>
-            </div>
+              {{ page.pageNum }}
+            </p>
           </div>
+          
+          <!-- 底部占位符 -->
+          <div class="thumbnail-spacer" :style="{ height: Math.max(0, (totalPages - thumbnailEndIndex) * 123) + 'px' }"></div>
         </div>
         
         <!-- PDF内容区域 -->
-        <div class="document-content" ref="documentContent">
+        <div class="document-content">
           <div v-if="!pdfLoaded" class="empty-state">
             <el-icon size="64" color="#c0c4cc">
               <Document />
@@ -81,7 +97,7 @@
             <p>请选择一个PDF文件开始查看</p>
           </div>
 
-          <div v-else class="pdf-content" ref="pdfContent" :style="{ transform: `scale(${pdfScale})`, transformOrigin: 'top center' }">
+          <div v-else v-loading="isLoading" element-loading-text="正在加载PDF..." class="pdf-content" ref="pdfContent" :style="{ transform: `scale(${pdfScale})`, transformOrigin: 'top center' }">
             <div 
               v-for="page in pages" 
               :key="page.pageNum"
@@ -141,11 +157,12 @@ import { TextSelectionUtils } from '../utils/textSelectionUtils.js'
 
 // 响应式数据
 const documentPanel = ref(null)
-const documentContent = ref(null)
 const pdfContent = ref(null)
 const pageContent = ref([])
 const fileInput = ref(null)
 const chatInterface = ref(null)
+const thumbnailContainerRef = ref(null)
+const thumbnailListRef = ref(null)
 
 const pdfLoaded = ref(false)
 const totalPages = ref(0)
@@ -154,6 +171,11 @@ const pages = ref([])
 const textSelectionEnabled = ref(false)
 const thumbnailsVisible = ref(false)
 const pdfScale = ref(1.0)
+const isLoading = ref(false)
+const isScreenshotMode = ref(false)
+const visibleThumbnails = ref([])
+const thumbnailStartIndex = ref(0)
+const thumbnailEndIndex = ref(20) // 初始显示前20个缩略图
 
 // 工具类实例
 let pdfUtils = null
@@ -232,20 +254,87 @@ async function loadDemoFile() {
 }
 
 async function renderPDF() {
+  isLoading.value = true
   const numPages = pdfUtils.getNumPages()
   pages.value = Array.from({ length: numPages }, (_, i) => ({
     pageNum: i + 1,
-    loaded: false
+    loaded: false,
+    loading: false
   }))
 
   await nextTick()
   
-  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-    await loadAndRenderPage(pageNum)
-    if (pageNum % 5 === 0) {
-      await new Promise(resolve => setTimeout(resolve, 50))
-    }
+  // 初始化可见缩略图
+  if (thumbnailsVisible.value) {
+    updateVisibleThumbnails()
   }
+  
+  // 根据截图模式决定加载策略
+  if (isScreenshotMode.value) {
+    // 截图模式：加载所有页面
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      await loadAndRenderPage(pageNum)
+      if (pageNum % 5 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+    }
+  } else {
+    // 虚拟列表模式：先加载前3页
+    const initialLoadCount = Math.min(3, numPages)
+    for (let pageNum = 1; pageNum <= initialLoadCount; pageNum++) {
+      await loadAndRenderPage(pageNum)
+    }
+    
+    // 设置滚动监听
+    await nextTick()
+    setupScrollObserver()
+  }
+  
+  isLoading.value = false
+}
+
+// 设置滚动监听，实现虚拟列表
+function setupScrollObserver() {
+  if (!pdfContent.value) return
+  
+  // 如果已经有观察者，先断开
+  if (window.pdfPageObserver) {
+    window.pdfPageObserver.disconnect()
+  }
+  
+  window.pdfPageObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const pageElement = entry.target
+        const pageNum = parseInt(pageElement.getAttribute('data-page'))
+        
+        // 触发加载当前页及相邻页
+        const loadPages = [
+          pageNum - 1,
+          pageNum,
+          pageNum + 1
+        ].filter(num => num >= 1 && num <= totalPages.value)
+        
+        loadPages.forEach(num => {
+          const index = num - 1
+          if (!pages.value[index] || !pages.value[index].loaded) {
+            loadAndRenderPage(num)
+          }
+        })
+      }
+    })
+  }, {
+    root: pdfContent.value.parentElement, // 使用父容器作为root
+    rootMargin: '300px' // 提前300px开始加载
+  })
+  
+  // 监听所有页面元素
+  setTimeout(() => {
+    const pageElements = pdfContent.value.querySelectorAll('.pdf-page')
+    pageElements.forEach(el => {
+      window.pdfPageObserver.observe(el)
+    })
+  }, 100)
 }
 
 async function loadAndRenderPage(pageNum) {
@@ -357,7 +446,45 @@ async function loadAndRenderPage(pageNum) {
     await renderTextLayer(textLayer, pageData.page, pageData.viewport, pageData.pageNum)
   }
   
+  // 生成缩略图
+  await generateThumbnail(pageNum, pageData)
+  
   pdfUtils.preloadAdjacentPages(pageNum, 1)
+}
+
+// 生成缩略图
+async function generateThumbnail(pageNum, pageData) {
+  try {
+    // 缩略图尺寸
+    const thumbnailWidth = 80
+    const thumbnailHeight = 113
+    
+    // 创建缩略图 canvas
+    const thumbnailCanvas = document.createElement('canvas')
+    thumbnailCanvas.width = thumbnailWidth
+    thumbnailCanvas.height = thumbnailHeight
+    const thumbnailCtx = thumbnailCanvas.getContext('2d')
+    
+    // 从原始 canvas 绘制到缩略图
+    if (pageData.canvas) {
+      thumbnailCtx.drawImage(
+        pageData.canvas,
+        0, 0, pageData.canvas.width, pageData.canvas.height,
+        0, 0, thumbnailWidth, thumbnailHeight
+      )
+    }
+    
+    // 转换为 base64 图片URL
+    const thumbnailUrl = thumbnailCanvas.toDataURL('image/png')
+    
+    // 保存到 page 对象中
+    const index = pageNum - 1
+    if (pages.value[index]) {
+      pages.value[index].thumbnailUrl = thumbnailUrl
+    }
+  } catch (error) {
+    console.error(`生成页面 ${pageNum} 缩略图失败:`, error)
+  }
 }
 
 async function renderTextLayer(textLayerDiv, page, viewport, pageNum) {
@@ -444,7 +571,7 @@ async function renderTextLayer(textLayerDiv, page, viewport, pageNum) {
   }
 }
 
-function startScreenshot() {
+async function startScreenshot() {
   if (!pdfLoaded.value) {
     ElMessage.warning('请先加载PDF文件')
     return
@@ -460,6 +587,25 @@ function startScreenshot() {
   }
   
   try {
+    // 进入截图模式，加载所有页面
+    if (!isScreenshotMode.value) {
+      isScreenshotMode.value = true
+      isLoading.value = true
+      
+      // 加载所有未加载的页面
+      for (let pageNum = 1; pageNum <= totalPages.value; pageNum++) {
+        const index = pageNum - 1
+        if (!pages.value[index] || !pages.value[index].loaded) {
+          await loadAndRenderPage(pageNum)
+          if (pageNum % 3 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+        }
+      }
+      
+      isLoading.value = false
+    }
+    
     screenshotUtils.startCapture(pdfContent.value)
   } catch (error) {
     ElMessage.error('截图启动失败: ' + error.message)
@@ -473,6 +619,36 @@ function enableTextSelection() {
 
 function toggleThumbnails() {
   thumbnailsVisible.value = !thumbnailsVisible.value
+  if (thumbnailsVisible.value) {
+    updateVisibleThumbnails()
+  }
+}
+
+// 更新可见的缩略图
+function updateVisibleThumbnails() {
+  visibleThumbnails.value = pages.value.slice(thumbnailStartIndex.value, thumbnailEndIndex.value)
+}
+
+// 处理缩略图滚动，实现虚拟列表
+function handleThumbnailScroll() {
+  if (!thumbnailContainerRef.value) return
+  
+  const scrollTop = thumbnailContainerRef.value.scrollTop
+  const containerHeight = thumbnailContainerRef.value.clientHeight
+  const itemHeight = 123 // 缩略图高度 + margin (113 + 10)
+  
+  // 计算可见范围
+  const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - 5)
+  const endIndex = Math.min(
+    totalPages.value, 
+    Math.ceil((scrollTop + containerHeight) / itemHeight) + 5
+  )
+  
+  if (startIndex !== thumbnailStartIndex.value || endIndex !== thumbnailEndIndex.value) {
+    thumbnailStartIndex.value = startIndex
+    thumbnailEndIndex.value = endIndex
+    updateVisibleThumbnails()
+  }
 }
 
 function prevPage() {
@@ -681,12 +857,13 @@ function handleSendMessage(message) {
     background-color: #ffffff;
   }
 
-  .thumbnail-placeholder {
+  .thumbnail-img {
+    width: 80px;
+    height: 113px;
+    object-fit: contain;
     border-radius: 5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #f5f5f5;
+    display: block;
+    margin: 0 auto;
   }
 
   .thumbnail-number {
@@ -695,6 +872,12 @@ function handleSendMessage(message) {
     font-weight: 500;
     font-size: 14px;
     margin-top: 5px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  .thumbnail-spacer {
+    width: 100%;
   }
 }
 
